@@ -15,7 +15,6 @@ import (
 func NewArchiveUploadHandler() *upload.Handler {
 	return upload.NewHandler(upload.DefaultStore, map[upload.Purpose]upload.Finalizer{
 		upload.PurposeBackup: finalizeBackupUpload,
-		upload.PurposePlugin: finalizePluginUpload,
 		upload.PurposeTheme:  finalizeThemeUpload,
 	})
 }
