@@ -18,6 +18,9 @@ func RegisterWithGroupAndMeta(name, group string, cb rpc.Handler, meta *rpc.Meth
 		group = "common"
 	}
 	method := group + ":" + name
+	if !monitoringMethodEnabled(method) {
+		return nil
+	}
 	if meta == nil {
 		meta = &rpc.MethodMeta{}
 	}

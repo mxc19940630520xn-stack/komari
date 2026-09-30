@@ -1,13 +1,15 @@
 package router
 
 import (
+	"io"
+	"net/http"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"github.com/komari-monitor/komari/web/api"
 	"github.com/komari-monitor/komari/web/api/admin"
 	"github.com/komari-monitor/komari/web/api/client"
 	public_api "github.com/komari-monitor/komari/web/api/public"
-	"github.com/komari-monitor/komari/web/api/terminal"
-	"github.com/komari-monitor/komari/web/filemanager"
 	"github.com/komari-monitor/komari/web/public"
 	jsonRpc "github.com/komari-monitor/komari/web/rpc/jsonrpc"
 )
@@ -26,7 +28,20 @@ func Register(r *gin.Engine) {
 	registerAdminRoutes(r)
 
 	public.Static(r.Group("/"), func(handlers ...gin.HandlerFunc) {
-		r.NoRoute(handlers...)
+		// Removed API endpoints must not fall through to the frontend HTML.
+		r.NoRoute(append([]gin.HandlerFunc{func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+				// Drain small, bounded legacy JSON requests before rejecting them.
+				// Otherwise Connection: close clients can lose the response to a TCP
+				// reset when their body arrives after the handler has already returned.
+				if size := c.Request.ContentLength; size > 0 && size <= 64<<10 {
+					_, _ = io.CopyN(io.Discard, c.Request.Body, size)
+				}
+				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"status": "error", "message": "API endpoint not found"})
+				return
+			}
+			c.Next()
+		}}, handlers...)...)
 	})
 }
 
@@ -37,11 +52,6 @@ func registerPublicRoutes(r *gin.Engine) {
 	r.GET("/api/logout", public_api.Logout)
 	r.GET("/api/oauth", public_api.OAuth)
 	r.GET("/api/oauth_callback", public_api.OAuthCallback)
-	// 插件公开页面（visibility=public 的 iframe 页面），无需鉴权。
-	r.GET("/api/plugin/:short/*filepath", public_api.ServePluginFile)
-	// 短期文件预览令牌公开下载入口，供 Office 在线预览等服务端抓取。
-	r.GET("/api/preview/client/:uuid/file/download", filemanager.PreviewDownload)
-	r.HEAD("/api/preview/client/:uuid/file/download", filemanager.PreviewDownload)
 	// /api/clients 是 WebSocket 端点（客户端发 "get"/"get <uuid>" 拉取在线列表与最新上报），
 	// 非 JSON-RPC，保留为 WS handler。
 	r.GET("/api/clients", api.GetClients)
@@ -71,17 +81,12 @@ func registerAgentRoutes(r *gin.Engine) {
 		// Agent 上报统一使用 v2 JSON-RPC。
 		tokenAuthorized.GET("/v2/rpc", client.WebSocketV2RPC)
 		tokenAuthorized.POST("/v2/rpc", client.UploadV2RPC)
-		// File data uses a short-lived, raw HTTP stream opened by a file RPC.
-		tokenAuthorized.GET("/transfer/:id", filemanager.AgentTransfer)
-		tokenAuthorized.POST("/transfer/:id", filemanager.AgentTransfer)
-		tokenAuthorized.GET("/terminal", terminal.EstablishConnection)
 	}
 }
 
 // registerAdminRoutes 管理员路由。除二进制/流类外全部经 Bind 绑定到 admin: 命名空间方法。
 func registerAdminRoutes(r *gin.Engine) {
 	g := r.Group("/api/admin", api.RequireRole(api.RoleAdmin))
-	admin.RegisterPprofRoutes(g)
 
 	// --- 二进制/流/重定向类，保留 REST handler ---
 	g.GET("/download/backup", admin.DownloadBackup)
@@ -94,7 +99,6 @@ func registerAdminRoutes(r *gin.Engine) {
 		uploadGroup.POST("/cancel", uploadHandler.Cancel)
 	}
 	g.GET("/test/geoip", jsonRpc.Bind("admin:testGeoip", jsonRpc.WithQuery("ip")))
-	g.POST("/test/sendMessage", jsonRpc.Bind("admin:testSendMessage"))
 	g.POST("/update/mmdb", admin.UpdateMmdbGeoIP)
 	g.POST("/update/user", admin.UpdateUser)
 	g.PUT("/update/favicon", admin.UploadFavicon)
@@ -134,28 +138,13 @@ func registerAdminRoutes(r *gin.Engine) {
 
 	// --- 以下全部 JSON -> RPC2 ---
 
-	// tasks（远程执行）
-	task := g.Group("/task")
-	{
-		task.GET("/all", jsonRpc.Bind("admin:getTasks"))
-		task.POST("/exec", api.RequireSensitive2FA(), jsonRpc.Bind("admin:exec"))
-		task.GET("/:task_id", jsonRpc.Bind("admin:getTaskById", jsonRpc.WithPath("task_id")))
-		task.GET("/:task_id/result", jsonRpc.Bind("admin:getTaskResultsByTaskId", jsonRpc.WithPath("task_id")))
-		task.GET("/:task_id/result/:uuid", jsonRpc.Bind("admin:getSpecificTaskResult", jsonRpc.WithPath("task_id", "uuid")))
-		task.GET("/client/:uuid", jsonRpc.Bind("admin:getTasksByClientId", jsonRpc.WithPath("uuid")))
-	}
-
 	// settings
 	settings := g.Group("/settings")
 	{
 		settings.GET("/", jsonRpc.Bind("admin:getSettings"))
 		settings.POST("/", jsonRpc.Bind("admin:editSettings"))
-		settings.GET("/xtermjs", jsonRpc.Bind("admin:getXtermjsSettings"))
-		settings.POST("/xtermjs", jsonRpc.Bind("admin:setXtermjsSettings", jsonRpc.WithMessage("settings saved")))
 		settings.POST("/oidc", jsonRpc.Bind("admin:setOidcProvider"))
 		settings.GET("/oidc", jsonRpc.Bind("admin:getOidcProvider", jsonRpc.WithQuery("provider")))
-		settings.POST("/message-sender", jsonRpc.Bind("admin:setMessageSenderProvider"))
-		settings.GET("/message-sender", jsonRpc.Bind("admin:getMessageSenderProvider", jsonRpc.WithQuery("provider")))
 	}
 
 	// database storage inspection and maintenance
@@ -175,14 +164,6 @@ func registerAdminRoutes(r *gin.Engine) {
 		clientGroup.POST("/:uuid/remove", jsonRpc.Bind("admin:removeClient", jsonRpc.WithPath("uuid")))
 		clientGroup.GET("/:uuid/token", jsonRpc.Bind("admin:getClientToken", jsonRpc.WithPath("uuid"), jsonRpc.WithFlat()))
 		clientGroup.POST("/order", jsonRpc.Bind("admin:orderClients"))
-		// RequestTerminal validates 2FA only when creating a new session. Reattach
-		// requests are authenticated against the existing session owner so a short
-		// network flap does not depend on the current TOTP window.
-		clientGroup.GET("/:uuid/terminal", terminal.RequestTerminal)
-		clientGroup.POST("/:uuid/file/upload", filemanager.Upload)
-		clientGroup.GET("/:uuid/file/download", filemanager.Download)
-		clientGroup.HEAD("/:uuid/file/download", filemanager.Download)
-		clientGroup.GET("/:uuid/file/preview-token", filemanager.CreatePreviewToken)
 	}
 
 	// records
@@ -201,52 +182,6 @@ func registerAdminRoutes(r *gin.Engine) {
 	}
 
 	g.GET("/logs", jsonRpc.Bind("admin:getLogs", jsonRpc.WithQuery("limit", "page")))
-
-	// clipboard
-	clipboardGroup := g.Group("/clipboard")
-	{
-		clipboardGroup.GET("/:id", jsonRpc.Bind("admin:getClipboard", jsonRpc.WithPath("id")))
-		clipboardGroup.GET("", jsonRpc.Bind("admin:listClipboard"))
-		clipboardGroup.POST("", jsonRpc.Bind("admin:createClipboard"))
-		clipboardGroup.POST("/:id", jsonRpc.Bind("admin:updateClipboard", jsonRpc.WithPath("id")))
-		clipboardGroup.POST("/remove", jsonRpc.Bind("admin:batchDeleteClipboard"))
-		clipboardGroup.POST("/:id/remove", jsonRpc.Bind("admin:deleteClipboard", jsonRpc.WithPath("id")))
-	}
-
-	// plugins: 安装流程通过统一的分片上传接口，启停/列表/日志走 RPC2，市场对齐主题市场。
-	pluginGroup := g.Group("/plugin")
-	{
-		pluginGroup.GET("/list", jsonRpc.Bind("admin:listPlugins"))
-		pluginGroup.POST("/enabled", jsonRpc.Bind("admin:setPluginEnabled"))
-		pluginGroup.GET("/logs", jsonRpc.Bind("admin:getPluginLogs", jsonRpc.WithQuery("short")))
-		pluginGroup.GET("/market/sources", admin.ListPluginMarketSources)
-		pluginGroup.POST("/market/sources", admin.CreatePluginMarketSource)
-		pluginGroup.PUT("/market/sources/:id", admin.UpdatePluginMarketSource)
-		pluginGroup.DELETE("/market/sources/:id", admin.DeletePluginMarketSource)
-		pluginGroup.GET("/market/catalog", admin.ListPluginMarketCatalog)
-		pluginGroup.POST("/market/install", admin.InstallPluginFromMarket)
-		pluginGroup.POST("/delete", jsonRpc.Bind("admin:deletePlugin"))
-		pluginGroup.GET("/configuration", jsonRpc.Bind("admin:getPluginConfiguration", jsonRpc.WithQuery("short")))
-		pluginGroup.POST("/configuration", jsonRpc.Bind("admin:setPluginConfiguration"))
-		// 插件注入的管理页面静态文件
-		pluginGroup.GET("/:short/*filepath", admin.ServePluginFile)
-	}
-
-	// notifications
-	notificationGroup := g.Group("/notification")
-	{
-		notificationGroup.GET("/offline", jsonRpc.Bind("admin:listOfflineNotifications"))
-		notificationGroup.POST("/offline/edit", jsonRpc.Bind("admin:editOfflineNotification"))
-		notificationGroup.POST("/offline/enable", jsonRpc.Bind("admin:enableOfflineNotification"))
-		notificationGroup.POST("/offline/disable", jsonRpc.Bind("admin:disableOfflineNotification"))
-		loadAlert := notificationGroup.Group("/load")
-		{
-			loadAlert.GET("/", jsonRpc.Bind("admin:getAllLoadNotifications"))
-			loadAlert.POST("/add", jsonRpc.Bind("admin:addLoadNotification"))
-			loadAlert.POST("/delete", jsonRpc.Bind("admin:deleteLoadNotification"))
-			loadAlert.POST("/edit", jsonRpc.Bind("admin:editLoadNotification"))
-		}
-	}
 
 	// ping tasks
 	pingTask := g.Group("/ping")

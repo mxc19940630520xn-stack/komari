@@ -55,6 +55,9 @@ func (s *IPAPIService) GetGeoInfo(ip net.IP) (*GeoInfo, error) {
 		return nil, fmt.Errorf("failed to get geo info from ip-api.com: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("ip-api.com returned non-200 status: %d", resp.StatusCode)
+	}
 
 	var apiResp ipAPIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {

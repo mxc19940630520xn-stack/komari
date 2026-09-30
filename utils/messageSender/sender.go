@@ -14,6 +14,7 @@ import (
 	"github.com/komari-monitor/komari/database/clients"
 	"github.com/komari-monitor/komari/database/models"
 	"github.com/komari-monitor/komari/internal/config"
+	"github.com/komari-monitor/komari/internal/edition"
 	"github.com/komari-monitor/komari/utils/messageSender/factory"
 )
 
@@ -42,6 +43,9 @@ func Shutdown() error {
 }
 
 func Initialize() {
+	if !edition.Notifications {
+		return
+	}
 	go func() {
 		once.Do(func() {
 			all := factory.GetAllMessageSenders()
@@ -84,6 +88,9 @@ func Initialize() {
 }
 
 func SendTextMessage(message string, title string) error {
+	if !edition.Notifications {
+		return nil
+	}
 	if CurrentProvider() == nil {
 		return fmt.Errorf("message sender provider is not initialized")
 	}
@@ -109,6 +116,9 @@ func SendTextMessage(message string, title string) error {
 // SendNotification 是通知发送的统一实现：解析事件中的客户端 UUID（外部传入可只含
 // UUID 字段）后委托 SendEvent。内部调用与 admin:sendNotification RPC 共用此实现。
 func SendNotification(event models.EventMessage) error {
+	if !edition.Notifications {
+		return nil
+	}
 	if len(event.Clients) > 0 {
 		eventClients := make([]models.Client, 0, len(event.Clients))
 		for _, c := range event.Clients {
@@ -128,6 +138,9 @@ func SendNotification(event models.EventMessage) error {
 }
 
 func SendEvent(event models.EventMessage) error {
+	if !edition.Notifications {
+		return nil
+	}
 	if CurrentProvider() == nil {
 		return fmt.Errorf("message sender provider is not initialized")
 	}

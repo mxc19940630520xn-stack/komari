@@ -38,3 +38,7 @@ komari
 .codex
 
 /web/filemanager/data
+
+# Generated frontend sources and embedded build output
+/komari-web/
+/web/public/defaultTheme/

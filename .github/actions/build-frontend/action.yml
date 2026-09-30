@@ -9,8 +9,8 @@ inputs:
     description: komari-web repository URL.
     default: https://github.com/komari-monitor/komari-web
   ref:
-    description: Optional komari-web ref to build. Uses the repository default branch when empty.
-    default: ""
+    description: Pinned komari-web revision compatible with the monitoring patch.
+    default: "0321789bc1989e53df729dfc98bed2a2800c39c6"
   artifact-name:
     description: Optional artifact name for the packed frontend theme.
     default: ""
@@ -37,13 +37,14 @@ runs:
       run: |
         set -euxo pipefail
         rm -rf komari-web
-        if [ -n "${{ inputs.ref }}" ]; then
-          git clone --depth=1 --branch "${{ inputs.ref }}" "${{ inputs.repository }}" komari-web
-        else
-          git clone --depth=1 "${{ inputs.repository }}" komari-web
-        fi
+        git init komari-web
+        git -C komari-web remote add origin "${{ inputs.repository }}"
+        git -C komari-web fetch --depth=1 origin "${{ inputs.ref }}"
+        git -C komari-web checkout --detach FETCH_HEAD
+        git -C komari-web apply --check "$GITHUB_WORKSPACE/frontend/monitoring.patch"
+        git -C komari-web apply "$GITHUB_WORKSPACE/frontend/monitoring.patch"
         cd komari-web
-        npm install
+        npm ci
         npm run build
         cd ..
 

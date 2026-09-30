@@ -1,5 +1,11 @@
 # Komari
 
+> **本分支为监控精简版。** 保留节点探针（CPU、内存、磁盘与在线状态）、延迟/丢包、流量统计、价格/账单周期/到期信息，以及登录、节点管理、备份和主题功能。移除默认界面中的远程终端、文件管理、远程命令、插件、通知告警及性能分析入口，并停用相应服务端接口和后台任务。
+>
+> 第三方主题仍可通过主题市场或上传导入使用，主题配置格式和监控数据接口保持兼容；依赖插件或远程控制功能的主题扩展不在保留范围内。已有数据表不会删除。
+>
+> 构建本精简版请参见 [构建说明](frontend/README.md)，或使用此仓库构建出的发布文件。下方上游安装链接提供的是上游版本。
+
 ![Badge](https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2Fkomari-monitor%2Fkomari&label=&icon=github&color=%23a370f7&message=&style=flat&tz=UTC)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/komari-monitor/komari)
 

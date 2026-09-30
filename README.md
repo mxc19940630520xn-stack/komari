@@ -1,5 +1,16 @@
 # Komari
 
+> **This branch is a monitoring-only edition.** It retains probes and resource status,
+> latency/packet loss, traffic statistics, price/billing/expiry information, accounts,
+> node management, backups and themes. Remote terminals, file management, command
+> execution, plugins, notifications and profiling are disabled in the default UI
+> and backend. Existing database tables are preserved.
+>
+> Community theme imports, the theme market and monitoring API contracts remain
+> supported. Theme extensions that require removed features are unavailable.
+> See [build instructions](frontend/README.md) for this edition; upstream installation
+> links below install the upstream product.
+
 ![Badge](https://hitscounter.dev/api/hit?url=https%3A%2F%2Fgithub.com%2Fkomari-monitor%2Fkomari&label=&icon=github&color=%23a370f7&message=&style=flat&tz=UTC)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/komari-monitor/komari)
 

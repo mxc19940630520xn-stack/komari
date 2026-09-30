@@ -1,0 +1,687 @@
+diff --git a/src/components/admin/AdminPanelBar.tsx b/src/components/admin/AdminPanelBar.tsx
+index 7b32631..2deb71d 100644
+--- a/src/components/admin/AdminPanelBar.tsx
++++ b/src/components/admin/AdminPanelBar.tsx
+@@ -20,7 +20,7 @@ import ThemeSwitch from "../ThemeSwitch";
+ import { useIsMobile } from "@/hooks/use-mobile";
+ import menuConfig from "../../config/menuConfig.json";
+ import type { MenuItem } from "../../types/menu";
+-import { iconMap, resolvePluginIcon } from "../../utils/iconHelper";
++import { iconMap } from "../../utils/iconHelper";
+ import { ChevronDownIcon } from "@radix-ui/react-icons";
+ import { TablerMenu2 } from "../Icones/Tabler";
+ import InlineSvgIcon from "../InlineSvgIcon";
+@@ -30,7 +30,6 @@ import Tips from "../ui/tips";
+ import { CircleFadingArrowUp } from "lucide-react";
+ import { useRPC2Call } from "@/contexts/RPC2Context";
+ import { resolveI18nText } from "@/utils/i18nText";
+-import type { PluginInfo } from "@/types/plugin";
+ import GuidedTour from "@/components/onboarding/GuidedTour";
+ import { useAdminGuide } from "@/components/onboarding/useAdminGuide";
+ import {
+@@ -89,8 +88,7 @@ const AdminPanelBar = ({ content, onboardingReady = false }: AdminPanelBarProps)
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [onboarding.guide, onboarding.step, onboarding.menu, isMobile]);
+   const isConfigFormPage =
+-    location.pathname === "/admin/theme_managed" ||
+-    location.pathname === "/admin/plugins/config";
++    location.pathname === "/admin/theme_managed";
+   const { publicInfo } = usePublicInfo();
+   const { refreshVersion } = useAdminNavigation();
+   //const navigate = useNavigate();
+@@ -123,7 +121,6 @@ const AdminPanelBar = ({ content, onboardingReady = false }: AdminPanelBarProps)
+ 
+   // 动态扩展菜单（主题 + 插件注入页面）
+   const [extraMenuItems, setExtraMenuItems] = useState<ExtendedMenuItem[]>([]);
+-  const [pluginMenuItems, setPluginMenuItems] = useState<ExtendedMenuItem[]>([]);
+ 
+   useEffect(() => {
+     let ignore = false;
+@@ -188,58 +185,6 @@ const AdminPanelBar = ({ content, onboardingReady = false }: AdminPanelBarProps)
+       ignore = true;
+     };
+   }, [currentTheme, refreshVersion]);
+-  // 插件注入的管理页面：manifest pages（visibility=admin）-> 插件菜单的二级菜单。
+-  // iframe 页面进入 plugin-page 路由；redirect 页面复用主题的站内跳转校验。
+-  useEffect(() => {
+-    let ignore = false;
+-    async function loadPluginMenu() {
+-      try {
+-        const result = await call<any, PluginInfo[]>("admin:listPlugins");
+-        if (ignore || !Array.isArray(result)) return;
+-        const pluginIconUrl = (plugin: PluginInfo, icon?: string) =>
+-          resolvePluginIcon(plugin.short, icon) || "Blocks";
+-        const items: ExtendedMenuItem[] = [];
+-        for (const plugin of result) {
+-          if (!plugin.enabled) continue; // 未启用的插件不注入导航菜单
+-          for (const page of plugin.pages || []) {
+-            if (page.visibility === "public") continue; // 公开页面走公开路由，不进后台导航
+-            const label =
+-              resolveI18nText(page.title, currentLanguage) ||
+-              resolveI18nText(plugin.name, currentLanguage) ||
+-              plugin.short;
+-            const pageType = page.type || "iframe";
+-            if (pageType === "redirect") {
+-              const target = normalizeThemeRedirectTarget(page.url);
+-              if (!target) continue;
+-              items.push({
+-                labelKey: label,
+-                rawLabel: label,
+-                path: target,
+-                icon: pluginIconUrl(plugin, page.icon),
+-                reloadDocument: true, // 与主题 redirect 一致：整页跳转到站内路径
+-              });
+-              continue;
+-            }
+-            items.push({
+-              labelKey: label,
+-              rawLabel: label,
+-              path: `/admin/plugin-page?short=${encodeURIComponent(plugin.short)}&file=${encodeURIComponent(page.file || "")}`,
+-              icon: pluginIconUrl(plugin, page.icon),
+-            });
+-          }
+-        }
+-        if (!ignore) setPluginMenuItems(items);
+-      } catch (e) {
+-        console.warn("加载插件菜单失败:", e);
+-        if (!ignore) setPluginMenuItems([]);
+-      }
+-    }
+-    loadPluginMenu();
+-    return () => {
+-      ignore = true;
+-    };
+-  }, [call, currentLanguage, refreshVersion]);
+-
+   useEffect(() => {
+     const fetchVersionInfo = async () => {
+       try {
+@@ -337,15 +282,9 @@ const AdminPanelBar = ({ content, onboardingReady = false }: AdminPanelBarProps)
+           children: [...(item.children || []), ...extraMenuItems],
+         };
+       }
+-      if (item.labelKey === "plugin.title" && pluginMenuItems.length > 0) {
+-        return {
+-          ...item,
+-          children: [...(item.children || []), ...pluginMenuItems],
+-        };
+-      }
+       return item;
+     });
+-  }, [extraMenuItems, pluginMenuItems]);
++  }, [extraMenuItems]);
+   const bottomStartPath = mergedBaseMenuItems.find(
+     (item) => item.bottom,
+   )?.path;
+@@ -837,7 +776,7 @@ const AdminPanelBar = ({ content, onboardingReady = false }: AdminPanelBarProps)
+           onDismiss={onboarding.dismiss}
+           onShown={onboarding.onShown}
+           action={{
+-            label: t(`onboarding.${onboarding.guide}.action`),
++            label: t(onboarding.guide === "markets" ? "market.themes" : `onboarding.${onboarding.guide}.action`),
+             onClick: onboarding.act,
+           }}
+         />
+diff --git a/src/components/admin/NodeTable/NodeFunction.tsx b/src/components/admin/NodeTable/NodeFunction.tsx
+index 055129d..196f449 100644
+--- a/src/components/admin/NodeTable/NodeFunction.tsx
++++ b/src/components/admin/NodeTable/NodeFunction.tsx
+@@ -2,7 +2,7 @@ import * as React from "react";
+ import { z } from "zod";
+ import { schema } from "@/components/admin/NodeTable/schema/node";
+ import { DataTableRefreshContext } from "@/components/admin/NodeTable/schema/DataTableRefreshContext";
+-import { Terminal, Trash2, Copy, Download, DollarSign } from "lucide-react";
++import { Trash2, Copy, Download, DollarSign } from "lucide-react";
+ import { t } from "i18next";
+ import type { Row } from "@tanstack/react-table";
+ import { EditDialog } from "./NodeEditDialog";
+@@ -26,7 +26,6 @@ async function removeClient(uuid: string) {
+ }
+ 
+ type InstallOptions = {
+-  disableWebSsh: boolean;
+   disableAutoUpdate: boolean;
+   ignoreUnsafeCert: boolean;
+   ghproxy: string;
+@@ -42,7 +41,6 @@ export function ActionsCell({ row }: { row: Row<z.infer<typeof schema>> }) {
+   const [selectedPlatform, setSelectedPlatform] =
+     React.useState<Platform>("linux");
+   const [installOptions, setInstallOptions] = React.useState<InstallOptions>({
+-    disableWebSsh: false,
+     disableAutoUpdate: false,
+     ignoreUnsafeCert: false,
+     ghproxy: "",
+@@ -55,9 +53,7 @@ export function ActionsCell({ row }: { row: Row<z.infer<typeof schema>> }) {
+     const token = row.original.token ?? "";
+     const args: string[] = ["-e", host, "-t", token];
+     // 根据安装选项生成参数
+-    if (installOptions.disableWebSsh) {
+-      args.push("--disable-web-ssh");
+-    }
++    args.push("--disable-web-ssh");
+     if (installOptions.disableAutoUpdate) {
+       args.push("--disable-auto-update");
+     }
+@@ -152,28 +148,6 @@ export function ActionsCell({ row }: { row: Row<z.infer<typeof schema>> }) {
+                 {t("admin.nodeTable.installOptions", "安装选项")}
+               </label>
+               <div className="grid grid-cols-2 gap-2">
+-                <Flex gap="2">
+-                  <Checkbox
+-                    checked={installOptions.disableWebSsh}
+-                    onCheckedChange={(checked) => {
+-                      setInstallOptions((prev) => ({
+-                        ...prev,
+-                        disableWebSsh: Boolean(checked),
+-                      }));
+-                    }}
+-                  />
+-                  <label
+-                    className="text-sm font-normal"
+-                    onClick={() => {
+-                      setInstallOptions((prev) => ({
+-                        ...prev,
+-                        disableWebSsh: !prev.disableWebSsh,
+-                      }));
+-                    }}
+-                  >
+-                    {t("admin.nodeTable.disableWebSsh", "禁用 WebSSH")}
+-                  </label>
+-                </Flex>
+                 <Flex gap="2">
+                   <Checkbox
+                     checked={installOptions.disableAutoUpdate}
+@@ -292,15 +266,6 @@ export function ActionsCell({ row }: { row: Row<z.infer<typeof schema>> }) {
+           </div>
+         </Dialog.Content>
+       </Dialog.Root>
+-      <a href={`/terminal?uuid=${row.original.uuid}`} target="_blank">
+-        <IconButton
+-          variant="ghost"
+-          title={t("terminal.title", "Terminal")}
+-          aria-label={t("terminal.title", "Terminal")}
+-        >
+-          <Terminal className="p-1" />
+-        </IconButton>
+-      </a>
+       {/** Edit Button */}
+       <EditDialog item={row.original} />
+       {/** Edit Money */}
+diff --git a/src/components/admin/dashboard/ExtraWidgets.tsx b/src/components/admin/dashboard/ExtraWidgets.tsx
+index b9b0172..ae40df4 100644
+--- a/src/components/admin/dashboard/ExtraWidgets.tsx
++++ b/src/components/admin/dashboard/ExtraWidgets.tsx
+@@ -1,5 +1,5 @@
+ import { Flex, Text } from "@radix-ui/themes";
+-import { ArrowUpRight, Bell, Boxes, Cpu, HardDrive, MemoryStick, Server, Terminal } from "lucide-react";
++import { ArrowUpRight, Activity, Palette, Boxes, Cpu, HardDrive, MemoryStick, Server, Terminal } from "lucide-react";
+ import { Link } from "react-router-dom";
+ import { useTranslation } from "react-i18next";
+ import type { NodeBasicInfo } from "@/contexts/NodeListContext";
+@@ -50,8 +50,8 @@ export function ExtraWidget({ kind, nodes, latest, limit = 5 }: {
+     </Flex> : <Text size="2" color="gray">{t("dashboard.noData", "No data")}</Text>)}
+     {kind === "shortcuts" && <div>
+       <Link className="km-dashboard-quick-link" to="/admin/servers"><Server size={17} />{t("dashboardLayout.servers")}<ArrowUpRight size={15} /></Link>
+-      <a className="km-dashboard-quick-link" href="/terminal" target="_blank" rel="noreferrer"><Terminal size={17} />{t("dashboardLayout.terminal")}<ArrowUpRight size={15} /></a>
+-      <Link className="km-dashboard-quick-link" to="/admin/settings/notification"><Bell size={17} />{t("dashboardLayout.notifications")}<ArrowUpRight size={15} /></Link>
++      <Link className="km-dashboard-quick-link" to="/admin/ping"><Activity size={17} />{t("ping.title")}<ArrowUpRight size={15} /></Link>
++      <Link className="km-dashboard-quick-link" to="/admin/themes"><Palette size={17} />{t("theme.title")}<ArrowUpRight size={15} /></Link>
+     </div>}
+   </Flex>;
+ }
+diff --git a/src/components/onboarding/guideState.ts b/src/components/onboarding/guideState.ts
+index f46a8ce..9e70655 100644
+--- a/src/components/onboarding/guideState.ts
++++ b/src/components/onboarding/guideState.ts
+@@ -18,8 +18,6 @@ export function parseGuideState(value: unknown): GuideState {
+ export function selectAdminGuide(nodeCount: number, state: GuideState): GuideId | null {
+   const candidates: GuideId[] = [
+     ...(nodeCount === 0 ? ["install" as const] : []),
+-    ...(nodeCount > 0 && !state.workbenchOpened ? ["workbench" as const] : []),
+-    "notifications",
+     "markets",
+   ];
+   return candidates.find((guide) => !state.seen.includes(guide)) ?? null;
+diff --git a/src/components/onboarding/useAdminGuide.ts b/src/components/onboarding/useAdminGuide.ts
+index 8c3e43f..0d642ef 100644
+--- a/src/components/onboarding/useAdminGuide.ts
++++ b/src/components/onboarding/useAdminGuide.ts
+@@ -12,18 +12,8 @@ const steps: Partial<Record<GuideId, GuideStep[]>> = {
+     { target: nav("/admin/servers"), title: "onboarding.install.title", description: "onboarding.install.description" },
+     { target: '[data-guide="add-node"]', title: "onboarding.install.add_title", description: "onboarding.install.add_description" },
+   ],
+-  workbench: [
+-    { target: nav("/terminal"), title: "onboarding.workbench.title", description: "onboarding.workbench.description" },
+-    { target: nav("/terminal"), title: "onboarding.workbench.files_title", description: "onboarding.workbench.files_description" },
+-  ],
+-  notifications: [
+-    { target: nav("/admin/notification/channels"), title: "onboarding.notifications.title", description: "onboarding.notifications.description" },
+-    { target: nav("/admin/notification/offline"), title: "onboarding.notifications.offline_title", description: "onboarding.notifications.offline_description" },
+-    { target: nav("/admin/notification/general"), title: "onboarding.notifications.rules_title", description: "onboarding.notifications.rules_description" },
+-  ],
+   markets: [
+     { target: nav("/admin/market/themes"), title: "onboarding.markets.title", description: "onboarding.markets.description" },
+-    { target: nav("/admin/market/plugins"), title: "onboarding.markets.plugins_title", description: "onboarding.markets.plugins_description" },
+   ],
+ };
+ 
+@@ -76,8 +66,7 @@ export function useAdminGuide(ready: boolean) {
+   };
+ 
+   const guideSteps = guide ? steps[guide] ?? [] : [];
+-  const menu = guide === "notifications" ? "/admin/notification/channels"
+-    : guide === "markets" ? (step === 0 ? "/admin/themes" : "/admin/plugins") : null;
++  const menu = guide === "markets" ? "/admin/themes" : null;
+ 
+   return {
+     guide,
+@@ -88,10 +77,8 @@ export function useAdminGuide(ready: boolean) {
+     dismiss: () => setGuide(null),
+     onShown: () => { if (guide) history.mark(guide); },
+     act: () => {
++      if (guide === "markets") navigate("/admin/market/themes");
+       if (guide === "install") document.querySelector<HTMLButtonElement>('[data-guide="add-node"]')?.click();
+-      if (guide === "workbench") window.open("/terminal", "_blank", "noopener,noreferrer");
+-      if (guide === "notifications") navigate("/admin/notification/channels");
+-      if (guide === "markets") navigate("/admin/market/plugins");
+     },
+   };
+ }
+diff --git a/src/config/menuConfig.json b/src/config/menuConfig.json
+index f66d260..101d8dd 100644
+--- a/src/config/menuConfig.json
++++ b/src/config/menuConfig.json
+@@ -11,54 +11,9 @@
+       "icon": "Server"
+     },
+     {
+-      "labelKey": "operations.workbench",
+-      "path": "/terminal",
+-      "icon": "SquareTerminal",
+-      "newTab": true
+-    },
+-    {
+-      "labelKey": "operations.title",
++      "labelKey": "ping.title",
+       "path": "/admin/ping",
+-      "icon": "Bolt",
+-      "children": [
+-        {
+-          "labelKey": "ping.title",
+-          "path": "/admin/ping",
+-          "icon": "Activity"
+-        },
+-        {
+-          "labelKey": "exec.title",
+-          "path": "/admin/exec",
+-          "icon": "Code"
+-        },
+-        {
+-          "labelKey": "sessions.title",
+-          "path": "/admin/sessions",
+-          "icon": "Users"
+-        }
+-      ]
+-    },
+-    {
+-      "labelKey": "notification.title",
+-      "path": "/admin/notification/channels",
+-      "icon": "Bell",
+-      "children": [
+-        {
+-          "labelKey": "notification.channels.title",
+-          "path": "/admin/notification/channels",
+-          "icon": "MessageCircleMore"
+-        },
+-        {
+-          "labelKey": "notification.general.title",
+-          "path": "/admin/notification/general",
+-          "icon": "Ellipsis"
+-        },
+-        {
+-          "labelKey": "notification.offline.title",
+-          "path": "/admin/notification/offline",
+-          "icon": "Unplug"
+-        }
+-      ]
++      "icon": "Activity"
+     },
+     {
+       "labelKey": "theme.menu",
+@@ -77,28 +32,6 @@
+         }
+       ]
+     },
+-    {
+-      "labelKey": "plugin.title",
+-      "path": "/admin/plugins",
+-      "icon": "Blocks",
+-      "children": [
+-        {
+-          "labelKey": "plugin.manage",
+-          "path": "/admin/plugins",
+-          "icon": "Blocks"
+-        },
+-        {
+-          "labelKey": "plugin.market",
+-          "path": "/admin/market/plugins",
+-          "icon": "Store"
+-        },
+-        {
+-          "labelKey": "plugin.config",
+-          "path": "/admin/plugins/config",
+-          "icon": "Settings2"
+-        }
+-      ]
+-    },
+     {
+       "labelKey": "system.title",
+       "path": "/admin/settings/site",
+@@ -128,11 +61,6 @@
+           "labelKey": "logs.title",
+           "path": "/admin/logs",
+           "icon": "FileText"
+-        },
+-        {
+-          "labelKey": "pprof.title",
+-          "path": "/admin/pprof",
+-          "icon": "Activity"
+         }
+       ]
+     },
+@@ -146,6 +74,11 @@
+           "path": "/admin/account",
+           "icon": "UserCircle"
+         },
++        {
++          "labelKey": "sessions.title",
++          "path": "/admin/sessions",
++          "icon": "Users"
++        },
+         {
+           "labelKey": "common.about",
+           "path": "/admin/about",
+diff --git a/src/pages/admin/index.tsx b/src/pages/admin/index.tsx
+index 6e8bd27..b10f358 100644
+--- a/src/pages/admin/index.tsx
++++ b/src/pages/admin/index.tsx
+@@ -31,7 +31,6 @@ import {
+   Plus,
+   Radar,
+   Settings,
+-  Terminal,
+   Trash2Icon,
+ } from "lucide-react";
+ import { Link } from "react-router-dom";
+@@ -176,7 +175,6 @@ const EmptyNodesGuide = () => {
+ };
+ 
+ type AutoDiscoveryInstallOptions = {
+-  disableWebSsh: boolean;
+   disableAutoUpdate: boolean;
+   ignoreUnsafeCert: boolean;
+   memoryIncludeCache: boolean;
+@@ -235,7 +233,6 @@ const AutoDiscoverySection = ({
+   const [showOptions, setShowOptions] = React.useState(false);
+   const [installOptions, setInstallOptions] =
+     React.useState<AutoDiscoveryInstallOptions>({
+-      disableWebSsh: false,
+       disableAutoUpdate: false,
+       ignoreUnsafeCert: false,
+       memoryIncludeCache: false,
+@@ -288,9 +285,7 @@ const AutoDiscoverySection = ({
+       return `http://${settings.script_domain.replace(/\/+$/, "")}`;
+     })();
+     const args: string[] = ["-e", host, "--auto-discovery", adKey];
+-    if (installOptions.disableWebSsh) {
+-      args.push("--disable-web-ssh");
+-    }
++    args.push("--disable-web-ssh");
+     if (installOptions.disableAutoUpdate) {
+       args.push("--disable-auto-update");
+     }
+@@ -524,28 +519,6 @@ const AutoDiscoverySection = ({
+       {showOptions && (
+         <Flex direction="column" gap="2">
+           <div className="grid grid-cols-2 gap-2">
+-            <Flex gap="2" align="center">
+-              <Checkbox
+-                checked={installOptions.disableWebSsh}
+-                onCheckedChange={(checked) =>
+-                  setInstallOptions((prev) => ({
+-                    ...prev,
+-                    disableWebSsh: Boolean(checked),
+-                  }))
+-                }
+-              />
+-              <label
+-                className="text-sm font-normal cursor-pointer"
+-                onClick={() =>
+-                  setInstallOptions((prev) => ({
+-                    ...prev,
+-                    disableWebSsh: !prev.disableWebSsh,
+-                  }))
+-                }
+-              >
+-                {t("admin.nodeTable.disableWebSsh")}
+-              </label>
+-            </Flex>
+             <Flex gap="2" align="center">
+               <Checkbox
+                 checked={installOptions.disableAutoUpdate}
+@@ -1437,7 +1410,6 @@ const ActionButtons = ({
+   settings: any;
+   isSnapshotBackend: boolean;
+ }) => {
+-  const { t } = useTranslation();
+   return (
+     <div className="flex items-center gap-4">
+       <GenerateCommandButton
+@@ -1445,15 +1417,6 @@ const ActionButtons = ({
+         settings={settings}
+         isSnapshotBackend={isSnapshotBackend}
+       />
+-      <IconButton
+-        title={t("terminal.title")}
+-        variant="ghost"
+-        onClick={() => {
+-          window.open(`/terminal?uuid=${node.uuid}`, "_blank");
+-        }}
+-      >
+-        <Terminal size="18" />
+-      </IconButton>
+       <EditButton node={node} />
+       <BillingButton node={node} />
+       <DeleteButton node={node} />
+@@ -1509,7 +1472,6 @@ function DeleteButton({ node }: { node: NodeDetail }) {
+   );
+ }
+ type InstallOptions = {
+-  disableWebSsh: boolean;
+   disableAutoUpdate: boolean;
+   ignoreUnsafeCert: boolean;
+   memoryIncludeCache: boolean;
+@@ -1537,7 +1499,6 @@ function GenerateCommandButton({
+   const [selectedPlatform, setSelectedPlatform] =
+     React.useState<Platform>("linux");
+   const [installOptions, setInstallOptions] = React.useState<InstallOptions>({
+-    disableWebSsh: false,
+     disableAutoUpdate: false,
+     ignoreUnsafeCert: false,
+     memoryIncludeCache: false,
+@@ -1591,9 +1552,7 @@ function GenerateCommandButton({
+     const token = node.token || "";
+     let args = ["-e", host, "-t", token];
+     // 根据安装选项生成参数
+-    if (installOptions.disableWebSsh) {
+-      args.push("--disable-web-ssh");
+-    }
++    args.push("--disable-web-ssh");
+     if (installOptions.disableAutoUpdate) {
+       args.push("--disable-auto-update");
+     }
+@@ -1764,28 +1723,6 @@ function GenerateCommandButton({
+               {t("admin.nodeTable.installOptions", "安装选项")}
+             </label>
+             <div className="grid grid-cols-2 gap-2">
+-              <Flex gap="2" align="center">
+-                <Checkbox
+-                  checked={installOptions.disableWebSsh}
+-                  onCheckedChange={(checked) => {
+-                    setInstallOptions((prev) => ({
+-                      ...prev,
+-                      disableWebSsh: Boolean(checked),
+-                    }));
+-                  }}
+-                />
+-                <label
+-                  className="text-sm font-normal"
+-                  onClick={() => {
+-                    setInstallOptions((prev) => ({
+-                      ...prev,
+-                      disableWebSsh: !prev.disableWebSsh,
+-                    }));
+-                  }}
+-                >
+-                  {t("admin.nodeTable.disableWebSsh")}
+-                </label>
+-              </Flex>
+               <Flex gap="2" align="center">
+                 <Checkbox
+                   checked={installOptions.disableAutoUpdate}
+diff --git a/src/routes.ts b/src/routes.ts
+index d6e3fa9..a234bb6 100644
+--- a/src/routes.ts
++++ b/src/routes.ts
+@@ -20,10 +20,6 @@ export const routes: RouteObject[] = [
+         path: "instance/:uuid",
+         element: React.createElement(lazy(() => import("./pages/instance"))),
+       },
+-      {
+-        path: "plugin/:short/*",
+-        element: React.createElement(lazy(() => import("./pages/plugin_page"))),
+-      },
+     ],
+   },
+   {
+@@ -92,36 +88,12 @@ export const routes: RouteObject[] = [
+           replace: true,
+         }),
+       },
+-      {
+-        path: "plugins",
+-        element: React.createElement(
+-          lazy(() => import("./pages/admin/plugins"))
+-        ),
+-      },
+-      {
+-        path: "plugins/config",
+-        element: React.createElement(
+-          lazy(() => import("./pages/admin/plugin_config"))
+-        ),
+-      },
+-      {
+-        path: "plugin-page",
+-        element: React.createElement(
+-          lazy(() => import("./pages/admin/plugin_page"))
+-        ),
+-      },
+       {
+         path: "market/themes",
+         element: React.createElement(
+           lazy(() => import("./pages/admin/market/themes"))
+         ),
+       },
+-      {
+-        path: "market/plugins",
+-        element: React.createElement(
+-          lazy(() => import("./pages/admin/market/plugins"))
+-        ),
+-      },
+       {
+         path: "sessions",
+         element: React.createElement(
+@@ -172,13 +144,6 @@ export const routes: RouteObject[] = [
+               lazy(() => import("./pages/admin/settings/sign-on"))
+             ),
+           },
+-          {
+-            path: "notification",
+-            element: React.createElement(Navigate, {
+-              to: "/admin/notification/channels",
+-              replace: true,
+-            }),
+-          },
+           {
+             path: "general",
+             element: React.createElement(
+@@ -193,44 +158,6 @@ export const routes: RouteObject[] = [
+           },
+         ],
+       },
+-      {
+-        path: "notification",
+-        children: [
+-          {
+-            index: true,
+-            element: React.createElement(Navigate, {
+-              to: "/admin/notification/channels",
+-              replace: true,
+-            }),
+-          },
+-          {
+-            path: "channels",
+-            element: React.createElement(
+-              lazy(() => import("./pages/admin/settings/_layout"))
+-            ),
+-            children: [
+-              {
+-                index: true,
+-                element: React.createElement(
+-                  lazy(() => import("./pages/admin/notification/channels"))
+-                ),
+-              },
+-            ],
+-          },
+-          {
+-            path: "offline",
+-            element: React.createElement(
+-              lazy(() => import("./pages/admin/notification/offline"))
+-            ),
+-          },
+-          {
+-            path: "general",
+-            element: React.createElement(
+-              lazy(() => import("./pages/admin/notification/general"))
+-            ),
+-          },
+-        ],
+-      },
+       {
+         path: "ping",
+         element: React.createElement(
+@@ -245,24 +172,8 @@ export const routes: RouteObject[] = [
+         path: "logs",
+         element: React.createElement(lazy(() => import("./pages/admin/log"))),
+       },
+-      {
+-        path: "pprof",
+-        element: React.createElement(lazy(() => import("./pages/admin/pprof"))),
+-      },
+-      {
+-        path: "exec",
+-        element: React.createElement(lazy(() => import("./pages/admin/exec"))),
+-      }
+     ],
+   },
+-  {
+-    path: "/terminal",
+-    element: React.createElement(lazy(() => import("./pages/terminal"))),
+-  },
+-  {
+-    path: "/manage/*",
+-    element: React.createElement(lazy(() => import("./pages/manage"))),
+-  },
+   // Catch-all 404 route
+   { path: "*", element: React.createElement(NotFound) },
+ ];

@@ -1,0 +1,2 @@
+# Unified diffs contain intentional space-only context lines.
+frontend/*.patch text eol=lf -whitespace
