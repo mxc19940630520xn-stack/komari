@@ -1,72 +1,102 @@
 package geoip_test
 
 import (
+	"errors"
+	"io"
 	"net"
+	"net/http"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/komari-monitor/komari/utils/geoip"
 )
 
-// 测试GeoIP数据库的初始化和更新功能
-func TestMmdb(t *testing.T) {
-	geoip.CurrentProvider, _ = geoip.NewMaxMindGeoIPService()
-	testIpAddr(t)
-}
-func TestIpApi(t *testing.T) {
-	geoip.CurrentProvider, _ = geoip.NewIPAPIService()
-	testIpAddr(t)
-}
+type roundTripFunc func(*http.Request) (*http.Response, error)
 
-func TestGeojs(t *testing.T) {
-	geoip.CurrentProvider, _ = geoip.NewGeoJSService()
-	testIpAddr(t)
-}
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func TestIpInfo(t *testing.T) {
-	geoip.CurrentProvider, _ = geoip.NewIPInfoService()
-	testIpAddr(t)
-}
-func testIpAddr(t *testing.T) {
-	// IPv4
-	ipaddr := "8.8.8.8"
-	ip := net.ParseIP(ipaddr)
-	record, err := geoip.GetGeoInfo(ip)
-	if err != nil {
-		t.Errorf("Failed to get GeoIP info for IP %s: %v", ipaddr, err)
+// Exercise real parsers and request paths without external APIs or rate limits.
+func TestHTTPGeoIPProviders(t *testing.T) {
+	providers := []struct {
+		name, body, countryName string
+		create                  func(*http.Client) geoip.GeoIPService
+	}{
+		{"ip-api", `{"status":"success","country":"United Kingdom","countryCode":"GB"}`, "United Kingdom", func(c *http.Client) geoip.GeoIPService { return &geoip.IPAPIService{Client: c} }},
+		{"geojs", `{"country":"United Kingdom","country_code":"GB"}`, "United Kingdom", func(c *http.Client) geoip.GeoIPService { return &geoip.GeoJSService{Client: c} }},
+		{"ipinfo", `{"country":"GB"}`, "GB", func(c *http.Client) geoip.GeoIPService { return &geoip.IPInfoService{Client: c} }},
 	}
-
-	if record != nil {
-		if record.ISOCode == "" && record.Name == "" {
-			t.Errorf("Country information is missing for IP %s", ipaddr)
+	for _, provider := range providers {
+		for _, ip := range []string{"8.8.8.8", "2001:4860:4860::8888"} {
+			t.Run(provider.name+"/"+ip, func(t *testing.T) {
+				client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if !strings.Contains(r.URL.Path, ip) {
+						t.Errorf("request missing IP: %s", r.URL)
+					}
+					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(provider.body)), Header: make(http.Header)}, nil
+				})}
+				info, err := provider.create(client).GetGeoInfo(net.ParseIP(ip))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if info == nil || info.ISOCode != "GB" || info.Name != provider.countryName {
+					t.Fatalf("unexpected country: %#v", info)
+				}
+			})
 		}
-	} else {
-		t.Errorf("GeoIP record is nil for IP %s", ipaddr)
-	}
-
-	t.Logf("IPv4:[%s]%s - %s", ipaddr, record.ISOCode, record.Name)
-
-	// IPv6
-	ipaddr = "2001:4860:4860::8888"
-	ip = net.ParseIP(ipaddr)
-	record, err = geoip.GetGeoInfo(ip)
-	if err != nil {
-		t.Errorf("Failed to get GeoIP info for IPv6 %s: %v", ipaddr, err)
-	}
-	if record != nil {
-		if record.ISOCode == "" && record.Name == "" {
-			t.Errorf("Country information is missing for IPv6 %s", ipaddr)
+		for _, failure := range []string{"network", "status", "invalid-json"} {
+			t.Run(provider.name+"/"+failure, func(t *testing.T) {
+				client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					if failure == "network" {
+						return nil, errors.New("offline")
+					}
+					status, body := 200, "invalid JSON"
+					if failure == "status" {
+						status, body = 503, provider.body
+					}
+					return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+				})}
+				if _, err := provider.create(client).GetGeoInfo(net.ParseIP("8.8.8.8")); err == nil {
+					t.Fatal("provider accepted failed response")
+				}
+			})
 		}
-	} else {
-		t.Errorf("GeoIP record is nil for IPv6 %s", ipaddr)
 	}
-	t.Logf("IPv6:[%s]%s - %s", ipaddr, record.ISOCode, record.Name)
+}
+
+// Live checks remain available explicitly; they are not unit-test prerequisites.
+func TestLiveGeoIP(t *testing.T) {
+	if os.Getenv("KOMARI_TEST_GEOIP_NETWORK") != "1" {
+		t.Skip("set KOMARI_TEST_GEOIP_NETWORK=1 to test external GeoIP services")
+	}
+	providers := map[string]func() (geoip.GeoIPService, error){
+		"mmdb":   func() (geoip.GeoIPService, error) { return geoip.NewMaxMindGeoIPService() },
+		"ip-api": func() (geoip.GeoIPService, error) { return geoip.NewIPAPIService() },
+		"geojs":  func() (geoip.GeoIPService, error) { return geoip.NewGeoJSService() },
+		"ipinfo": func() (geoip.GeoIPService, error) { return geoip.NewIPInfoService() },
+	}
+	for name, create := range providers {
+		t.Run(name, func(t *testing.T) {
+			provider, err := create()
+			if err != nil {
+				t.Fatalf("initialize provider: %v", err)
+			}
+			t.Cleanup(func() { _ = provider.Close() })
+			for _, ip := range []string{"8.8.8.8", "2001:4860:4860::8888"} {
+				info, err := provider.GetGeoInfo(net.ParseIP(ip))
+				if err != nil {
+					t.Fatalf("lookup %s: %v", ip, err)
+				}
+				if info == nil || info.ISOCode == "" {
+					t.Fatalf("missing country for %s: %#v", ip, info)
+				}
+			}
+		})
+	}
 }
 
 func TestUnicodeEmoji(t *testing.T) {
-	ISOCode := "CN"
-	emoji := geoip.GetRegionUnicodeEmoji(ISOCode)
-	if emoji != "🇨🇳" {
-		t.Errorf("Expected emoji for %s, got %s", ISOCode, emoji)
+	if got := geoip.GetRegionUnicodeEmoji("CN"); got != "🇨🇳" {
+		t.Fatalf("unexpected flag: %s", got)
 	}
-	t.Logf("Emoji for %s: %s", ISOCode, emoji)
 }
