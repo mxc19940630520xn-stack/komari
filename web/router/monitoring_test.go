@@ -1,10 +1,12 @@
 package router
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -45,6 +47,42 @@ func TestMonitoringRoutesKeepThemesAndProbes(t *testing.T) {
 		r.ServeHTTP(response, httptest.NewRequest(removed.method, removed.path, nil))
 		if response.Code != http.StatusNotFound || !strings.Contains(response.Header().Get("Content-Type"), "application/json") {
 			t.Errorf("removed endpoint %s returned %d %s", removed.path, response.Code, response.Body.String())
+		}
+	}
+}
+
+// Delay the body until after headers, like clients that send these separately.
+// A rejected POST must still receive the JSON error, not a connection reset.
+type delayedRequestBody struct{ io.Reader }
+
+func (r delayedRequestBody) Read(p []byte) (int, error) {
+	time.Sleep(5 * time.Millisecond)
+	return r.Reader.Read(p)
+}
+
+func TestRemovedPostReturnsJSONWithConnectionClose(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	Register(r)
+	server := httptest.NewServer(r)
+	defer server.Close()
+	client := server.Client()
+	client.Timeout = 3 * time.Second
+	for attempt := 0; attempt < 10; attempt++ {
+		req, err := http.NewRequest(http.MethodPost, server.URL+"/api/admin/task/exec", delayedRequestBody{strings.NewReader(`{"command":"ignored"}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.ContentLength = int64(len(`{"command":"ignored"}`))
+		req.Close = true
+		response, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("rejected POST lost its response: %v", err)
+		}
+		body, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusNotFound || !strings.Contains(string(body), "API endpoint not found") {
+			t.Fatalf("unexpected rejection: status=%d, body=%s, error=%v", response.StatusCode, body, err)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package router
 
 import (
+	"io"
 	"net/http"
 	"strings"
 
@@ -30,6 +31,12 @@ func Register(r *gin.Engine) {
 		// Removed API endpoints must not fall through to the frontend HTML.
 		r.NoRoute(append([]gin.HandlerFunc{func(c *gin.Context) {
 			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+				// Drain small, bounded legacy JSON requests before rejecting them.
+				// Otherwise Connection: close clients can lose the response to a TCP
+				// reset when their body arrives after the handler has already returned.
+				if size := c.Request.ContentLength; size > 0 && size <= 64<<10 {
+					_, _ = io.CopyN(io.Discard, c.Request.Body, size)
+				}
 				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"status": "error", "message": "API endpoint not found"})
 				return
 			}

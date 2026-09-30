@@ -123,7 +123,7 @@ index 7b32631..2deb71d 100644
            }}
          />
 diff --git a/src/components/admin/NodeTable/NodeFunction.tsx b/src/components/admin/NodeTable/NodeFunction.tsx
-index 055129d..4aaa816 100644
+index 055129d..196f449 100644
 --- a/src/components/admin/NodeTable/NodeFunction.tsx
 +++ b/src/components/admin/NodeTable/NodeFunction.tsx
 @@ -2,7 +2,7 @@ import * as React from "react";
@@ -135,16 +135,63 @@ index 055129d..4aaa816 100644
  import { t } from "i18next";
  import type { Row } from "@tanstack/react-table";
  import { EditDialog } from "./NodeEditDialog";
-@@ -42,7 +42,7 @@ export function ActionsCell({ row }: { row: Row<z.infer<typeof schema>> }) {
+@@ -26,7 +26,6 @@ async function removeClient(uuid: string) {
+ }
+ 
+ type InstallOptions = {
+-  disableWebSsh: boolean;
+   disableAutoUpdate: boolean;
+   ignoreUnsafeCert: boolean;
+   ghproxy: string;
+@@ -42,7 +41,6 @@ export function ActionsCell({ row }: { row: Row<z.infer<typeof schema>> }) {
    const [selectedPlatform, setSelectedPlatform] =
      React.useState<Platform>("linux");
    const [installOptions, setInstallOptions] = React.useState<InstallOptions>({
 -    disableWebSsh: false,
-+    disableWebSsh: true,
      disableAutoUpdate: false,
      ignoreUnsafeCert: false,
      ghproxy: "",
-@@ -292,15 +292,6 @@ export function ActionsCell({ row }: { row: Row<z.infer<typeof schema>> }) {
+@@ -55,9 +53,7 @@ export function ActionsCell({ row }: { row: Row<z.infer<typeof schema>> }) {
+     const token = row.original.token ?? "";
+     const args: string[] = ["-e", host, "-t", token];
+     // 根据安装选项生成参数
+-    if (installOptions.disableWebSsh) {
+-      args.push("--disable-web-ssh");
+-    }
++    args.push("--disable-web-ssh");
+     if (installOptions.disableAutoUpdate) {
+       args.push("--disable-auto-update");
+     }
+@@ -152,28 +148,6 @@ export function ActionsCell({ row }: { row: Row<z.infer<typeof schema>> }) {
+                 {t("admin.nodeTable.installOptions", "安装选项")}
+               </label>
+               <div className="grid grid-cols-2 gap-2">
+-                <Flex gap="2">
+-                  <Checkbox
+-                    checked={installOptions.disableWebSsh}
+-                    onCheckedChange={(checked) => {
+-                      setInstallOptions((prev) => ({
+-                        ...prev,
+-                        disableWebSsh: Boolean(checked),
+-                      }));
+-                    }}
+-                  />
+-                  <label
+-                    className="text-sm font-normal"
+-                    onClick={() => {
+-                      setInstallOptions((prev) => ({
+-                        ...prev,
+-                        disableWebSsh: !prev.disableWebSsh,
+-                      }));
+-                    }}
+-                  >
+-                    {t("admin.nodeTable.disableWebSsh", "禁用 WebSSH")}
+-                  </label>
+-                </Flex>
+                 <Flex gap="2">
+                   <Checkbox
+                     checked={installOptions.disableAutoUpdate}
+@@ -292,15 +266,6 @@ export function ActionsCell({ row }: { row: Row<z.infer<typeof schema>> }) {
            </div>
          </Dialog.Content>
        </Dialog.Root>
@@ -355,7 +402,7 @@ index f66d260..101d8dd 100644
            "labelKey": "common.about",
            "path": "/admin/about",
 diff --git a/src/pages/admin/index.tsx b/src/pages/admin/index.tsx
-index 6e8bd27..1b5a73a 100644
+index 6e8bd27..b10f358 100644
 --- a/src/pages/admin/index.tsx
 +++ b/src/pages/admin/index.tsx
 @@ -31,7 +31,6 @@ import {
@@ -366,16 +413,63 @@ index 6e8bd27..1b5a73a 100644
    Trash2Icon,
  } from "lucide-react";
  import { Link } from "react-router-dom";
-@@ -235,7 +234,7 @@ const AutoDiscoverySection = ({
+@@ -176,7 +175,6 @@ const EmptyNodesGuide = () => {
+ };
+ 
+ type AutoDiscoveryInstallOptions = {
+-  disableWebSsh: boolean;
+   disableAutoUpdate: boolean;
+   ignoreUnsafeCert: boolean;
+   memoryIncludeCache: boolean;
+@@ -235,7 +233,6 @@ const AutoDiscoverySection = ({
    const [showOptions, setShowOptions] = React.useState(false);
    const [installOptions, setInstallOptions] =
      React.useState<AutoDiscoveryInstallOptions>({
 -      disableWebSsh: false,
-+      disableWebSsh: true,
        disableAutoUpdate: false,
        ignoreUnsafeCert: false,
        memoryIncludeCache: false,
-@@ -1437,7 +1436,6 @@ const ActionButtons = ({
+@@ -288,9 +285,7 @@ const AutoDiscoverySection = ({
+       return `http://${settings.script_domain.replace(/\/+$/, "")}`;
+     })();
+     const args: string[] = ["-e", host, "--auto-discovery", adKey];
+-    if (installOptions.disableWebSsh) {
+-      args.push("--disable-web-ssh");
+-    }
++    args.push("--disable-web-ssh");
+     if (installOptions.disableAutoUpdate) {
+       args.push("--disable-auto-update");
+     }
+@@ -524,28 +519,6 @@ const AutoDiscoverySection = ({
+       {showOptions && (
+         <Flex direction="column" gap="2">
+           <div className="grid grid-cols-2 gap-2">
+-            <Flex gap="2" align="center">
+-              <Checkbox
+-                checked={installOptions.disableWebSsh}
+-                onCheckedChange={(checked) =>
+-                  setInstallOptions((prev) => ({
+-                    ...prev,
+-                    disableWebSsh: Boolean(checked),
+-                  }))
+-                }
+-              />
+-              <label
+-                className="text-sm font-normal cursor-pointer"
+-                onClick={() =>
+-                  setInstallOptions((prev) => ({
+-                    ...prev,
+-                    disableWebSsh: !prev.disableWebSsh,
+-                  }))
+-                }
+-              >
+-                {t("admin.nodeTable.disableWebSsh")}
+-              </label>
+-            </Flex>
+             <Flex gap="2" align="center">
+               <Checkbox
+                 checked={installOptions.disableAutoUpdate}
+@@ -1437,7 +1410,6 @@ const ActionButtons = ({
    settings: any;
    isSnapshotBackend: boolean;
  }) => {
@@ -383,7 +477,7 @@ index 6e8bd27..1b5a73a 100644
    return (
      <div className="flex items-center gap-4">
        <GenerateCommandButton
-@@ -1445,15 +1443,6 @@ const ActionButtons = ({
+@@ -1445,15 +1417,6 @@ const ActionButtons = ({
          settings={settings}
          isSnapshotBackend={isSnapshotBackend}
        />
@@ -399,15 +493,62 @@ index 6e8bd27..1b5a73a 100644
        <EditButton node={node} />
        <BillingButton node={node} />
        <DeleteButton node={node} />
-@@ -1537,7 +1526,7 @@ function GenerateCommandButton({
+@@ -1509,7 +1472,6 @@ function DeleteButton({ node }: { node: NodeDetail }) {
+   );
+ }
+ type InstallOptions = {
+-  disableWebSsh: boolean;
+   disableAutoUpdate: boolean;
+   ignoreUnsafeCert: boolean;
+   memoryIncludeCache: boolean;
+@@ -1537,7 +1499,6 @@ function GenerateCommandButton({
    const [selectedPlatform, setSelectedPlatform] =
      React.useState<Platform>("linux");
    const [installOptions, setInstallOptions] = React.useState<InstallOptions>({
 -    disableWebSsh: false,
-+    disableWebSsh: true,
      disableAutoUpdate: false,
      ignoreUnsafeCert: false,
      memoryIncludeCache: false,
+@@ -1591,9 +1552,7 @@ function GenerateCommandButton({
+     const token = node.token || "";
+     let args = ["-e", host, "-t", token];
+     // 根据安装选项生成参数
+-    if (installOptions.disableWebSsh) {
+-      args.push("--disable-web-ssh");
+-    }
++    args.push("--disable-web-ssh");
+     if (installOptions.disableAutoUpdate) {
+       args.push("--disable-auto-update");
+     }
+@@ -1764,28 +1723,6 @@ function GenerateCommandButton({
+               {t("admin.nodeTable.installOptions", "安装选项")}
+             </label>
+             <div className="grid grid-cols-2 gap-2">
+-              <Flex gap="2" align="center">
+-                <Checkbox
+-                  checked={installOptions.disableWebSsh}
+-                  onCheckedChange={(checked) => {
+-                    setInstallOptions((prev) => ({
+-                      ...prev,
+-                      disableWebSsh: Boolean(checked),
+-                    }));
+-                  }}
+-                />
+-                <label
+-                  className="text-sm font-normal"
+-                  onClick={() => {
+-                    setInstallOptions((prev) => ({
+-                      ...prev,
+-                      disableWebSsh: !prev.disableWebSsh,
+-                    }));
+-                  }}
+-                >
+-                  {t("admin.nodeTable.disableWebSsh")}
+-                </label>
+-              </Flex>
+               <Flex gap="2" align="center">
+                 <Checkbox
+                   checked={installOptions.disableAutoUpdate}
 diff --git a/src/routes.ts b/src/routes.ts
 index d6e3fa9..a234bb6 100644
 --- a/src/routes.ts
